@@ -15,6 +15,22 @@ A .NET 8 MCP (Model Context Protocol) server that enables AI assistants to query
 |------|-------------|
 | `nl_query` | Execute natural language queries against the database |
 
+### nl_query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | string | (required) | Natural language query to execute |
+| `output_format` | string | `formatted` | Output format for results |
+
+### Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `formatted` | Table format with column headers and row count |
+| `json` | JSON array of objects |
+| `csv` | Comma-separated values |
+| `query_only` | Returns only the generated SQL without executing it |
+
 ## Requirements
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
@@ -75,8 +91,6 @@ dotnet build MsqlMcpServer/MsqlMcpServer.sln
 
 ### 4. Configure your MCP client
 
-#### Claude Code
-
 Add to your `.mcp.json` file (project or user level):
 
 ```json
@@ -86,90 +100,6 @@ Add to your `.mcp.json` file (project or user level):
       "type": "stdio",
       "command": "dotnet",
       "args": ["run", "--project", "/path/to/MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj"]
-    }
-  }
-}
-```
-
-#### Claude Desktop
-
-Add to your Claude Desktop configuration file:
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "sqlmcp": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj"]
-    }
-  }
-}
-```
-
-## Machine-Wide Installation
-
-To use the MCP server from any directory, you can install it system-wide.
-
-### Option 1: Publish as standalone executable (recommended)
-
-1. Publish the app to a fixed location:
-```bash
-dotnet publish MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj -c Release -o C:/Tools/sqlmcp
-```
-
-2. Copy your configured `appsettings.json` to the publish folder (`C:/Tools/sqlmcp/`)
-
-3. Add to your user-level MCP configuration:
-
-**Claude Code** (`~/.claude/settings.json`):
-```json
-{
-  "mcpServers": {
-    "sqlmcp": {
-      "type": "stdio",
-      "command": "C:/Tools/sqlmcp/MsqlMcpServer.exe"
-    }
-  }
-}
-```
-
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "sqlmcp": {
-      "command": "C:/Tools/sqlmcp/MsqlMcpServer.exe"
-    }
-  }
-}
-```
-
-### Option 2: Use dotnet run with absolute paths
-
-Add to your user-level MCP configuration with the full path to the project:
-
-**Claude Code** (`~/.claude/settings.json`):
-```json
-{
-  "mcpServers": {
-    "sqlmcp": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--project", "F:/sqlmcp/MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj"]
-    }
-  }
-}
-```
-
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "sqlmcp": {
-      "command": "dotnet",
-      "args": ["run", "--project", "F:/sqlmcp/MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj"]
     }
   }
 }
@@ -189,25 +119,38 @@ The server will:
 3. Execute the query against your database
 4. Return formatted results
 
-## Development
+### Output Format Examples
 
-### Build
+**Formatted (default):**
+```
+au_fname | au_lname | city
+---------------------------
+Johnson | White | Menlo Park
+Marjorie | Green | Oakland
 
-```bash
-dotnet build MsqlMcpServer/MsqlMcpServer.sln
+(2 rows)
 ```
 
-### Run directly
-
-```bash
-dotnet run --project MsqlMcpServer/MsqlMcpServer/MsqlMcpServer.csproj
+**JSON:**
+```json
+[
+  {"au_fname": "Johnson", "au_lname": "White", "city": "Menlo Park"},
+  {"au_fname": "Marjorie", "au_lname": "Green", "city": "Oakland"}
+]
 ```
 
-### Build for release
-
-```bash
-dotnet build MsqlMcpServer/MsqlMcpServer.sln -c Release
+**CSV:**
 ```
+au_fname,au_lname,city
+Johnson,White,Menlo Park
+Marjorie,Green,Oakland
+```
+
+**Query Only:**
+```sql
+SELECT au_fname, au_lname, city FROM authors WHERE state = 'CA'
+```
+
 
 ## Security Notes
 

@@ -11,6 +11,7 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.SetBasePath(AppDomain.CurrentDomain.BaseDirectory);
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 
+builder.Logging.ClearProviders();
 builder.Logging.AddConsole(consoleLogOptions =>
 {
     // Configure all logs to go to stderr

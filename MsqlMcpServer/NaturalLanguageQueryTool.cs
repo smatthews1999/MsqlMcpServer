@@ -1,6 +1,7 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
@@ -13,8 +14,10 @@ public static class NaturalLanguageQueryTool
 {
     private const int MaxRows = 100;
 
-    [McpServerTool, Description("Execute a natural language query against the database. Returns query results in a readable format.")]
-    public static async Task<string> nl_query(string prompt)
+    [McpServerTool, Description("Execute a natural language query against the database. Use output_format to control result format: 'formatted' (default, table), 'query_only' (SQL only), 'csv', or 'json'.")]
+    public static async Task<string> nl_query(
+        string prompt,
+        string output_format = "formatted")
     {
         try
         {
@@ -37,8 +40,12 @@ public static class NaturalLanguageQueryTool
             if (!sql.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
                 return $"Error: Only SELECT queries allowed. Generated: {sql}";
 
-            // 5. Execute and format results
-            return await ExecuteQueryAsync(sql);
+            // 5. Handle query_only format - return SQL without executing
+            if (output_format.Equals("query_only", StringComparison.OrdinalIgnoreCase))
+                return sql;
+
+            // 6. Execute and format results
+            return await ExecuteQueryAsync(sql, output_format);
         }
         catch (Exception ex)
         {
@@ -90,12 +97,8 @@ Generate the SQL query:";
         }
     }
 
-    private static async Task<string> ExecuteQueryAsync(string sql)
+    private static async Task<string> ExecuteQueryAsync(string sql, string outputFormat)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine($"Query: {sql}");
-        sb.AppendLine();
-
         try
         {
             var connectionString = AppConfig.Configuration["ConnectionString"];
@@ -115,28 +118,90 @@ Generate the SQL query:";
             for (int i = 0; i < reader.FieldCount; i++)
                 columns.Add(reader.GetName(i));
 
-            sb.AppendLine(string.Join(" | ", columns));
-            sb.AppendLine(new string('-', columns.Count * 15));
-
-            // Read rows
-            int rowCount = 0;
-            while (await reader.ReadAsync() && rowCount < MaxRows)
+            // Read all rows into memory
+            var rows = new List<object?[]>();
+            while (await reader.ReadAsync() && rows.Count < MaxRows)
             {
-                var values = new List<string>();
+                var values = new object?[reader.FieldCount];
                 for (int i = 0; i < reader.FieldCount; i++)
-                    values.Add(reader.IsDBNull(i) ? "NULL" : reader.GetValue(i)?.ToString() ?? "NULL");
-                sb.AppendLine(string.Join(" | ", values));
-                rowCount++;
+                    values[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                rows.Add(values);
             }
 
-            sb.AppendLine();
-            sb.AppendLine($"({rowCount} rows)");
-
-            return sb.ToString();
+            // Format based on output_format
+            return outputFormat.ToLowerInvariant() switch
+            {
+                "csv" => FormatAsCsv(columns, rows),
+                "json" => FormatAsJson(columns, rows),
+                _ => FormatAsTable(sql, columns, rows)
+            };
         }
         catch (SqlException ex)
         {
-            return $"{sb}SQL Error: {ex.Message}";
+            return $"SQL Error: {ex.Message}";
         }
+    }
+
+    private static string FormatAsTable(string sql, List<string> columns, List<object?[]> rows)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join(" | ", columns));
+        sb.AppendLine(new string('-', columns.Count * 15));
+
+        foreach (var row in rows)
+        {
+            var values = row.Select(v => v?.ToString() ?? "NULL");
+            sb.AppendLine(string.Join(" | ", values));
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"({rows.Count} rows)");
+
+        return sb.ToString();
+    }
+
+    private static string FormatAsCsv(List<string> columns, List<object?[]> rows)
+    {
+        var sb = new StringBuilder();
+
+        // Header row
+        sb.AppendLine(string.Join(",", columns.Select(EscapeCsvField)));
+
+        // Data rows
+        foreach (var row in rows)
+        {
+            var values = row.Select(v => EscapeCsvField(v?.ToString() ?? ""));
+            sb.AppendLine(string.Join(",", values));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string EscapeCsvField(string field)
+    {
+        // RFC 4180: fields containing comma, quote, or newline must be quoted
+        if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))
+        {
+            // Double any existing quotes and wrap in quotes
+            return $"\"{field.Replace("\"", "\"\"")}\"";
+        }
+        return field;
+    }
+
+    private static string FormatAsJson(List<string> columns, List<object?[]> rows)
+    {
+        var result = new List<Dictionary<string, object?>>();
+
+        foreach (var row in rows)
+        {
+            var dict = new Dictionary<string, object?>();
+            for (int i = 0; i < columns.Count; i++)
+            {
+                dict[columns[i]] = row[i];
+            }
+            result.Add(dict);
+        }
+
+        return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
     }
 }
